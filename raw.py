@@ -1,11 +1,6 @@
 #!/usr/bin/env python
 
-'''Experiment with persisting experimental data.'''
-
-def show(title, items):
-    print(title)
-    for i in items:
-        print('..', i)
+'''Raw classes, no persistence.'''
 
 class Experiment:
     def __init__(self, name, details):
@@ -15,12 +10,14 @@ class Experiment:
     def __repr__(self):
         return f'<Experiment name="{self.name}" details={self.details}>'
 
+
 class PotionDetails:
     def __init__(self, potion):
         self.potion = potion
 
     def __repr__(self):
         return f'<PotionDetails potion="{self.potion}">'
+
 
 class SpellDetails:
     def __init__(self, spell):
@@ -29,8 +26,9 @@ class SpellDetails:
     def __repr__(self):
         return f'<SpellDetails spell={self.spell}>'
 
-ex = [
-    Experiment("with potion", PotionDetails("syrup")),
-    Experiment("with spell", SpellDetails(1234))
-]
-show("raw", ex)
+
+print('raw classes')
+print('..', Experiment('with potion', PotionDetails('syrup')))
+print('..', Experiment('with spell', SpellDetails(1234)))
+
+
