@@ -11,7 +11,7 @@ class Experiment:
         self.name = name
         self.details = details
 
-    def __repr__(self):
+    def __str__(self):
         return f'<{self.__class__.__name__} name="{self.name}" details={self.details}>'
 
 class DetailsTxt:
@@ -20,7 +20,7 @@ class DetailsTxt:
     def __init__(self, text):
         self.text = text
 
-    def __repr__(self):
+    def __str__(self):
         return f'<{self.__class__.__name__} text="{self.text}">'
 
 class DetailsNum:
@@ -29,7 +29,7 @@ class DetailsNum:
     def __init__(self, number):
         self.number = number
 
-    def __repr__(self):
+    def __str__(self):
         return f'<{self.__class__.__name__} number={self.number}>'
 
 print('== In-memory tests')

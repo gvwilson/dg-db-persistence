@@ -73,7 +73,7 @@ class ExperimentSql(SqlBase):
     name = Column(String(255), primary_key=True, nullable=False)
     details = Column(JSONColumn())
 
-    def __repr__(self):
+    def __str__(self):
         return f'<ExperimentSql name="{self.name}" details={self.details}>'
 
 class DetailsTxt(BaseModel):
@@ -129,11 +129,20 @@ class ExperimentModel(BaseModel):
     class Config:
         orm_mode = True
 
+    def __str__(self):
+        return f'<ExperimentModel name="{self.name}" details={self.details}>'
+
 # Test direct construction and conversion.
 temp = ExperimentSql(name='temp', details=DetailsNum(number=5678))
 print('temp originally constructed', temp)
-temp = ExperimentModel.from_orm(temp)
-print('temp constructed by Pydantic', temp)
+temp_as_pydantic = ExperimentModel.from_orm(temp)
+print('temp constructed by Pydantic', temp_as_pydantic)
+
+# Test conversion to/from JSON.
+temp_as_json = json.dumps(temp, cls=Encoder)
+print('temp as JSON', temp_as_json)
+temp_from_json = ExperimentModel(**json.loads(temp_as_json))
+print('temp constructed from JSON', temp_from_json)
 
 # Select rows back directly.
 print('SQL selection and Pydantic construction')

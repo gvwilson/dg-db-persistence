@@ -67,7 +67,7 @@ class Experiment(SqlBase, JSONizable):
     name = Column(String(255), primary_key=True, nullable=False)
     details = Column(JSONColumn())
 
-    def __repr__(self):
+    def __str__(self):
         return f'<Experiment name="{self.name}" details={self.details}>'
 
 class DetailsTxt(JSONizable):
@@ -81,7 +81,7 @@ class DetailsTxt(JSONizable):
     def __init__(self, text):
         self.text = text
 
-    def __repr__(self):
+    def __str__(self):
         return f'<Text text="{self.text}">'
 
 class DetailsNum(JSONizable):
@@ -95,7 +95,7 @@ class DetailsNum(JSONizable):
     def __init__(self, number):
         self.number = number
 
-    def __repr__(self):
+    def __str__(self):
         return f'<Number number={self.number}>'
 
 
