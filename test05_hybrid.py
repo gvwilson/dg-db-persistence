@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, select, Column, String
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import declarative_base, Session
 from sqlalchemy.types import TypeDecorator, TEXT
+from typing import Any
 
 from util import JSON_CLS, show
 
@@ -58,13 +59,14 @@ class JSONColumn(TypeDecorator):
             cls = value[JSON_CLS]
             del value[JSON_CLS]
             cls = globals()[cls] # I should be ashamed of doing this…
-            value = cls(**value)
+            result = cls(**value)
+            value = result
         return value
 
 
-class Experiment(SqlBase):
+class ExperimentSql(SqlBase):
     '''
-    Experiment is the only ORMable class, but it is _not_ directly JSONizable.
+    ExperimentSql is the only ORMable class.
     '''
 
     __tablename__ = 'experiment'
@@ -72,7 +74,7 @@ class Experiment(SqlBase):
     details = Column(JSONColumn())
 
     def __repr__(self):
-        return f'<Experiment name="{self.name}" details={self.details}>'
+        return f'<ExperimentSql name="{self.name}" details={self.details}>'
 
 class DetailsTxt(BaseModel):
     '''
@@ -96,8 +98,8 @@ except ValidationError as e:
 
 # Tests that work.
 tests = [
-    Experiment(name='with text', details=DetailsTxt(text='text content')),
-    Experiment(name='with number', details=DetailsNum(number=1234))
+    ExperimentSql(name='with text', details=DetailsTxt(text='text content')),
+    ExperimentSql(name='with number', details=DetailsNum(number=1234))
 ]
 show('test cases (objects)', tests)
 show('JSON persistence',
@@ -112,8 +114,30 @@ with Session(engine) as session:
     session.bulk_save_objects(tests)
     session.commit()
 
-# Select rows back.
-print('SQL persistence')
+# Select rows back directly.
+print('SQL direct selection')
 with Session(engine) as session:
-    for (i, r) in enumerate(session.execute(select(Experiment))):
-        print('row:', i, r)
+    for (i, row) in enumerate(session.execute(select(ExperimentSql))):
+        print('..', i, row[0])
+
+class ExperimentModel(BaseModel):
+    '''
+    Pydantic-validated class derived from ORM model.
+    '''
+    name: str
+    details: Any
+    class Config:
+        orm_mode = True
+
+# Test direct construction and conversion.
+temp = ExperimentSql(name='temp', details=DetailsNum(number=5678))
+print('temp originally constructed', temp)
+temp = ExperimentModel.from_orm(temp)
+print('temp constructed by Pydantic', temp)
+
+# Select rows back directly.
+print('SQL selection and Pydantic construction')
+with Session(engine) as session:
+    for (i, row) in enumerate(session.execute(select(ExperimentSql))):
+        converted = ExperimentModel.from_orm(row[0])
+        print('..', i, converted)

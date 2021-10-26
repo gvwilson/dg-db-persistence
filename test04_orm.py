@@ -118,6 +118,7 @@ with Session(engine) as session:
     session.commit()
 
 # Select rows back.
+print('selecting back')
 with Session(engine) as session:
     for (i, r) in enumerate(session.execute(select(Experiment))):
-        print('row:', i, r)
+        print('..', i, r[0])
