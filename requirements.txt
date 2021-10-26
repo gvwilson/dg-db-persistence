@@ -1,0 +1,5 @@
+protobuf
+protobuf2pydantic
+pydantic
+sqlalchemy
+sqlite
