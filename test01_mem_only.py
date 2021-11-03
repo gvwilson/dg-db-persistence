@@ -4,6 +4,7 @@
 
 import util
 
+
 class Experiment:
     '''An experiment has a name and some details.'''
 
@@ -14,6 +15,7 @@ class Experiment:
     def __str__(self):
         return f'<{self.__class__.__name__} name="{self.name}" details={self.details}>'
 
+
 class DetailsTxt:
     '''Details with text only.'''
 
@@ -22,6 +24,7 @@ class DetailsTxt:
 
     def __str__(self):
         return f'<{self.__class__.__name__} text="{self.text}">'
+
 
 class DetailsNum:
     '''Details with number only.'''
@@ -32,8 +35,10 @@ class DetailsNum:
     def __str__(self):
         return f'<{self.__class__.__name__} number={self.number}>'
 
-print('== In-memory tests')
-util.show('in-memory', [
-    Experiment('with text', DetailsTxt('text content')),
-    Experiment('with number', DetailsNum(1234))
-])
+
+if __name__ == '__main__':
+    print('== In-memory tests')
+    util.show('in-memory', [
+        Experiment('with text', DetailsTxt('text content')),
+        Experiment('with number', DetailsNum(1234))
+    ])

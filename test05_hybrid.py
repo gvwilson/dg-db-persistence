@@ -20,8 +20,10 @@ from typing import Any
 
 from util import JSON_CLS, show
 
+
 # Create the base for SQLAlchemy classes
 SqlBase = declarative_base()
+
 
 class Encoder(json.JSONEncoder):
     '''Custom JSON encoder for ORM.'''
@@ -76,6 +78,7 @@ class ExperimentSql(SqlBase):
     def __str__(self):
         return f'<ExperimentSql name="{self.name}" details={self.details}>'
 
+
 class DetailsTxt(BaseModel):
     '''
     Pydantic representation of textual experimental details.
@@ -89,36 +92,6 @@ class DetailsNum(BaseModel):
     '''
     number: int
 
-# Can't violate Pydantic constraints.
-print('== Pydantic')
-try:
-    DetailsNum(number='not a number')
-except ValidationError as e:
-    print('trying to create invalid Pydantic field:', e)
-
-# Tests that work.
-tests = [
-    ExperimentSql(name='with text', details=DetailsTxt(text='text content')),
-    ExperimentSql(name='with number', details=DetailsNum(number=1234))
-]
-show('test cases (objects)', tests)
-show('JSON persistence',
-     [json.dumps(e, cls=Encoder) for e in tests])
-
-# Create the database engine (in-memory SQLite for demo) and the tables.
-engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
-SqlBase.metadata.create_all(engine)
-
-# Insert the objects we've created.
-with Session(engine) as session:
-    session.bulk_save_objects(tests)
-    session.commit()
-
-# Select rows back directly.
-print('SQL direct selection')
-with Session(engine) as session:
-    for (i, row) in enumerate(session.execute(select(ExperimentSql))):
-        print('..', i, row[0])
 
 class ExperimentModel(BaseModel):
     '''
@@ -132,21 +105,53 @@ class ExperimentModel(BaseModel):
     def __str__(self):
         return f'<ExperimentModel name="{self.name}" details={self.details}>'
 
-# Test direct construction and conversion.
-temp = ExperimentSql(name='temp', details=DetailsNum(number=5678))
-print('temp originally constructed', temp)
-temp_as_pydantic = ExperimentModel.from_orm(temp)
-print('temp constructed by Pydantic', temp_as_pydantic)
+if __name__ == '__main__':
+    # Can't violate Pydantic constraints.
+    print('== Pydantic')
+    try:
+        DetailsNum(number='not a number')
+    except ValidationError as e:
+        print('trying to create invalid Pydantic field:', e)
 
-# Test conversion to/from JSON.
-temp_as_json = json.dumps(temp, cls=Encoder)
-print('temp as JSON', temp_as_json)
-temp_from_json = ExperimentModel(**json.loads(temp_as_json))
-print('temp constructed from JSON', temp_from_json)
+    # Tests that work.
+    tests = [
+        ExperimentSql(name='with text', details=DetailsTxt(text='text content')),
+        ExperimentSql(name='with number', details=DetailsNum(number=1234))
+    ]
+    show('test cases (objects)', tests)
+    show('JSON persistence',
+         [json.dumps(e, cls=Encoder) for e in tests])
 
-# Select rows back directly.
-print('SQL selection and Pydantic construction')
-with Session(engine) as session:
-    for (i, row) in enumerate(session.execute(select(ExperimentSql))):
-        converted = ExperimentModel.from_orm(row[0])
-        print('..', i, converted)
+    # Create the database engine (in-memory SQLite for demo) and the tables.
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    SqlBase.metadata.create_all(engine)
+
+    # Insert the objects we've created.
+    with Session(engine) as session:
+        session.bulk_save_objects(tests)
+        session.commit()
+
+    # Select rows back directly.
+    print('SQL direct selection')
+    with Session(engine) as session:
+        for (i, row) in enumerate(session.execute(select(ExperimentSql))):
+            print('..', i, row[0])
+
+    # Test direct construction and conversion.
+    temp = ExperimentSql(name='temp', details=DetailsNum(number=5678))
+    print('temp originally constructed', temp)
+    temp_as_pydantic = ExperimentModel.from_orm(temp)
+    print('temp constructed by Pydantic', temp_as_pydantic)
+
+    # Test conversion to/from JSON.
+    temp_as_json = json.dumps(temp, cls=Encoder)
+    print('temp as JSON', temp_as_json)
+    temp_from_json = ExperimentModel(**json.loads(temp_as_json))
+    print('temp constructed from JSON', temp_from_json)
+
+    # Select rows back directly.
+    print('SQL selection and Pydantic construction')
+    with Session(engine) as session:
+        for (i, row) in enumerate(session.execute(select(ExperimentSql))):
+            converted = ExperimentModel.from_orm(row[0])
+            print('..', i, converted)

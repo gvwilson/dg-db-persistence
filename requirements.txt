@@ -1,5 +1,6 @@
 protobuf
 protobuf2pydantic
+psycopg2
 pydantic
 sqlalchemy
 sqlite

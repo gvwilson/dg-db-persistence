@@ -15,9 +15,11 @@ from sqlalchemy.types import TypeDecorator, TEXT
 
 from util import JSON_CLS, show
 
+
 class JSONizable:
     '''Mix-in class for identifying JSONizable objects.'''
     pass
+
 
 class Encoder(json.JSONEncoder):
     '''Custom JSON encoder for ORM.'''
@@ -29,6 +31,7 @@ class Encoder(json.JSONEncoder):
             obj = {key:obj.__dict__[key] for key in obj._enc}
             obj[JSON_CLS] = class_name
         return obj
+
 
 
 class JSONColumn(TypeDecorator):
@@ -55,6 +58,7 @@ class JSONColumn(TypeDecorator):
 # Create the base for SQLAlchemy classes
 SqlBase = declarative_base()
 
+
 class Experiment(SqlBase, JSONizable):
     '''
     Experiment is the only ORMable class, but is also JSONizable.
@@ -70,6 +74,7 @@ class Experiment(SqlBase, JSONizable):
     def __str__(self):
         return f'<Experiment name="{self.name}" details={self.details}>'
 
+
 class DetailsTxt(JSONizable):
     '''
     Details with text only: not ORMable, but JSONizable.
@@ -83,6 +88,7 @@ class DetailsTxt(JSONizable):
 
     def __str__(self):
         return f'<Text text="{self.text}">'
+
 
 class DetailsNum(JSONizable):
     '''
@@ -99,26 +105,27 @@ class DetailsNum(JSONizable):
         return f'<Number number={self.number}>'
 
 
-tests = [
-    Experiment(name='with text', details=DetailsTxt('text content')),
-    Experiment(name='with number', details=DetailsNum(1234))
-]
-print('== ORMable and JSONable.')
-show('ORMable test cases', tests)
-show('ORMable JSON persistence',
-     [json.dumps(e, cls=Encoder) for e in tests])
+if __name__ == '__main__':
+    tests = [
+        Experiment(name='with text', details=DetailsTxt('text content')),
+        Experiment(name='with number', details=DetailsNum(1234))
+    ]
+    print('== ORMable and JSONable.')
+    show('ORMable test cases', tests)
+    show('ORMable JSON persistence',
+         [json.dumps(e, cls=Encoder) for e in tests])
 
-# Create the database engine (in-memory SQLite for demo) and the tables.
-engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
-SqlBase.metadata.create_all(engine)
+    # Create the database engine (in-memory SQLite for demo) and the tables.
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    SqlBase.metadata.create_all(engine)
 
-# Insert the objects we've created.
-with Session(engine) as session:
-    session.bulk_save_objects(tests)
-    session.commit()
+    # Insert the objects we've created.
+    with Session(engine) as session:
+        session.bulk_save_objects(tests)
+        session.commit()
 
-# Select rows back.
-print('selecting back')
-with Session(engine) as session:
-    for (i, r) in enumerate(session.execute(select(Experiment))):
-        print('..', i, r[0])
+    # Select rows back.
+    print('selecting back')
+    with Session(engine) as session:
+        for (i, r) in enumerate(session.execute(select(Experiment))):
+            print('..', i, r[0])

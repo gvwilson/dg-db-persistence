@@ -9,24 +9,30 @@ explicitly with `_enc`.
 
 import json
 import util
+
 from test01_mem_only import \
   Experiment as BaseExperiment, \
   DetailsTxt as BaseDetailsTxt, \
   DetailsNum as BaseDetailsNum
 from util import JSON_CLS, show
 
+
 class Encodable:
     '''Empty base class to make encodable classes identifiable.'''
     pass
 
+
 class Experiment(BaseExperiment, Encodable):
     _enc = ['name', 'details']
+
 
 class DetailsTxt(BaseDetailsTxt, Encodable):
     _enc = ['text']
 
+
 class DetailsNum(BaseDetailsNum, Encodable):
     _enc = ['number']
+
 
 class Encoder(json.JSONEncoder):
     '''Custom JSON encoder.'''
@@ -40,12 +46,13 @@ class Encoder(json.JSONEncoder):
         return obj
 
 
-tests = [
-    Experiment('with dictionary', {'k': 0}),
-    Experiment('with text', DetailsTxt('text content')),
-    Experiment('with number', DetailsNum(1234))
-]
-print('== Custom JSON encoding.')
-show('encodable test cases', tests)
-show('encoded JSON persistence',
-     [json.dumps(e, cls=Encoder) for e in tests])
+if __name__ == '__main__':
+    tests = [
+        Experiment('with dictionary', {'k': 0}),
+        Experiment('with text', DetailsTxt('text content')),
+        Experiment('with number', DetailsNum(1234))
+    ]
+    print('== Custom JSON encoding.')
+    show('encodable test cases', tests)
+    show('encoded JSON persistence',
+         [json.dumps(e, cls=Encoder) for e in tests])
