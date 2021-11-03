@@ -18,7 +18,7 @@ from util import JSON_CLS, show
 
 
 class Encodable:
-    '''Empty base class to make encodable classes identifiable.'''
+    '''Empty base class to identify encodable classes.'''
     pass
 
 

@@ -1,0 +1,11 @@
+<!DOCTYPE html lang="en">
+<html>
+  {% include head title=page.title subtitle=page.subtitle %}
+  <body>
+    <textarea id="source">
+{% include slide-title title=page.title subtitle=page.subtitle %}
+{{content}}
+    </textarea>
+    {% include slide-footer %}
+  </body>
+</html>

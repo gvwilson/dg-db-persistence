@@ -1,4 +1,6 @@
-.DS_Store
-*~
 *.pyc
+*~
+.DS_Store
+.jekyll-cache
 __pycache__
+_site

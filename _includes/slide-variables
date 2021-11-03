@@ -1,0 +1,2 @@
+{% assign slug = page.path | replace: '/index.html', '' | split: '/' | last %}
+{% assign entry = site.lessons | where: "slug", slug | last %}

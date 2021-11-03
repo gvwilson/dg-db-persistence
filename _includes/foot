@@ -1,0 +1,6 @@
+<footer>
+  {% for entry in site.footer %}
+  <a href="{{'/' | append: entry.slug | append: '/' | relative_url}}">{{entry.title}}</a>
+  {% unless forloop.last %} &middot; {% endunless %}
+  {% endfor %}
+</footer>

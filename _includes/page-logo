@@ -1,0 +1,3 @@
+<div class="page-logo">
+  <img src="{{'/static/deep-genomics.svg' | relative_url}}" alt="Deep Genomics logo" />
+</div>

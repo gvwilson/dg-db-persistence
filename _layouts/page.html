@@ -1,0 +1,11 @@
+{% include page-variables %}
+<!DOCTYPE html lang="en">
+<html>
+  {% include head title=title %}
+  <body class="{% if page.class %}{{page.class}}{% else %}narrow{% endif %}">
+    {% include page-logo %}
+    {% include page-title title=title %}
+{{content}}
+  </body>
+  {% include foot %}
+</html>

@@ -1,0 +1,11 @@
+class: title-slide
+
+<div align="center" style="padding-top: 2rem;">
+  <h1>{{include.title}}</h1>
+  <h2>{{include.subtitle}}</h2>
+  <p>
+    <img src="{{'/static/deep-genomics.svg' | relative_url}}" alt="Codebender logo" width="20%" />
+  </p>
+</div>
+
+---

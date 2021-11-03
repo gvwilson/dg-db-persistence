@@ -11,3 +11,7 @@ Small test/demo programs while figuring out hybrid persistence strategies.
 - `test04_orm.py`: persisting to a database with SQLAlchemy and a JSON column.
 
 - `test05_hybrid.py`: adding type checking with Pydantic.
+
+- `test06_using_postgresql.py`: persist JSON to PostgreSQL and select fields from JSON.
+
+- `test07_with_views.py`: using views to reflect data in JSON fields.

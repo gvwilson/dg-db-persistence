@@ -1,0 +1,8 @@
+<div align="center">
+  {% if include.title %}
+  <p><a href="{{'/' | relative_url}}">{{site.title}}</a></p>
+  <h1>{{include.title}}</h1>
+  {% else %}
+  <h1>{{site.title}}</h1>
+  {% endif %}
+</div>

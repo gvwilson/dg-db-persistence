@@ -1,0 +1,48 @@
+title: "JSON in PostgreSQL with SQLAlchemy and Pydantic"
+repository: gvwilson/hybrid-persistence
+author: "Greg Wilson"
+
+logo: "/static/deep-genomics.svg"
+
+exclude:
+  - README.md
+  - Makefile
+  - requirements.txt
+
+lessons:
+  - slug: "intro"
+    title: "Introduction"
+    lede: "Who you are, who's teaching this workshop, what we're going to cover, and how to set up."
+    time: 10
+  - slug: "hello-wdl"
+    title: "Hello, WDL"
+    lede: "Writing and running a simple workflow to test that everything is working."
+    time: 30
+  - slug: "docker"
+    title: "Using Docker"
+    lede: "Using Docker to run workflow tasks."
+    time: 30
+  - slug: "parameters"
+    title: "Using Parameters"
+    lede: "Building workflows that can handle a variety of files."
+    time: 20
+  - slug: "stages"
+    title: "Multiple Stages"
+    lede: "Combining multiple tasks in a single workflow."
+    time: 20
+  - slug: "multiple"
+    title: "Processing Multiple Files"
+    lede: "Handling multiple files in a single workflow."
+    time: 20
+  - slug: "modular"
+    title: "Modularization"
+    lede: "Putting tasks and workflows in separate files."
+    time: 20
+
+footer:
+  - slug: license
+    title: License
+  - slug: conduct
+    title: Code of Conduct
+  - slug: glossary
+    title: Glossary

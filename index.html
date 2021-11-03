@@ -1,0 +1,467 @@
+---
+layout: slides
+title: "JSON in PostgreSQL"
+subtitle: "With SQLAlchemy and Pydantic"
+---
+
+## Background
+
+- Lots of reasons to migrate from [Firestore][firestore] to [PostgreSQL][postgresql]
+- But what then?
+
+---
+
+## Setting Up
+
+- Install PostgreSQL using [installer][postgresql-mac] or Homebrew
+  - [Postgres.app][postgres-app] is a handy admin GUI
+- Run `psql` in a shell for command-line access
+
+| Type this | To do this |
+| --------- | ---------- |
+| `\l`      | list available databases |
+| `\c db`   | change to database |
+| `\dt`     | display tables |
+| `\dv`     | display views |
+| `\d table` | display table schema |
+| `select * from colors;` | query |
+
+---
+
+## In Memory
+
+```python
+class Experiment:
+    def __init__(self, name, details):
+        self.name = name
+        self.details = details
+
+class DetailsTxt:
+    def __init__(self, text): self.text = text
+
+class DetailsNum:
+    def __init__(self, number): self.number = number
+
+util.show('in-memory', [
+    Experiment('with text', DetailsTxt('the text')),
+    Experiment('with number', DetailsNum(1234))
+])
+```
+
+```console
+in-memory
+.. <Experiment name="with text" details=<DetailsTxt text="the text">>
+.. <Experiment name="with number" details=<DetailsNum number=1234>>
+```
+
+---
+
+## Custom Serialization
+
+- `BaseXYZ` is `XYZ` from the previous slide
+
+```python
+class Encodable:
+    '''Empty base class to identify encodable classes.'''
+    pass
+
+class Experiment(BaseExperiment, Encodable):
+    _enc = ['name', 'details']
+
+class DetailsTxt(BaseDetailsTxt, Encodable):
+    _enc = ['text']
+
+class DetailsNum(BaseDetailsNum, Encodable):
+    _enc = ['number']
+```
+
+- Don't worry, we'll get rid of `_enc`
+
+---
+
+## Custom serialization
+
+```python
+JSON_CLS = '_json_cls'
+
+class Encoder(json.JSONEncoder):
+    '''Custom JSON encoder.'''
+
+    def default(self, obj):
+        '''Record encodable objects as dicts with class name.'''
+        if isinstance(obj, Encodable):
+            class_name = obj.__class__.__name__
+            obj = {key:obj.__dict__[key] for key in obj._enc}
+            obj[JSON_CLS] = class_name
+        return obj
+```
+
+---
+
+## Custom serialization
+
+```python
+tests = [
+    Experiment('with dictionary', {'k': 0}),
+    Experiment('with text', DetailsTxt('the text')),
+    Experiment('with number', DetailsNum(1234))
+]
+show('encodable test cases', tests)
+show('encoded JSON persistence',
+     [json.dumps(e, cls=Encoder) for e in tests])
+```
+
+```console
+encodable test cases
+.. <Experiment name="with dictionary" details={'k': 0}>
+.. <Experiment name="with text" details=<DetailsTxt text="the text">>
+.. <Experiment name="with number" details=<DetailsNum number=1234>>
+encoded JSON persistence
+.. {"name": "with dictionary", "details": {"k": 0}, "_json_cls": "Experiment"}
+.. {"name": "with text", "details": {"text": "the text", "_json_cls": "DetailsTxt"}, "_json_cls": "Experiment"}
+.. {"name": "with number", "details": {"number": 1234, "_json_cls": "DetailsNum"}, "_json_cls": "Experiment"}
+```
+
+---
+
+## SQLAlchemy
+
+```python
+from sqlalchemy import create_engine, select, Column, String
+from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy.orm import declarative_base, Session
+from sqlalchemy.types import TypeDecorator, TEXT
+
+class JSONizable:
+    '''Mix-in class for identifying JSONizable objects.'''
+    pass
+
+class Encoder(json.JSONEncoder):
+    def default(self, obj):
+*       if isinstance(obj, JSONizable):
+            ...as before...
+```
+
+---
+
+## SQLAlchemy
+
+```python
+class JSONColumn(TypeDecorator):
+    impl = TEXT
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            value = json.dumps(value, cls=Encoder)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            value = json.loads(value)
+            cls = value[JSON_CLS]
+            del value[JSON_CLS]
+*           cls = globals()[cls] # I should be ashamed of doing this…
+            value = cls(**value)
+        return value
+```
+
+---
+
+## SQLAlchemy
+
+- Yes, we'll get rid of `_enc`, I promise…
+
+```python
+class Experiment(SqlBase, JSONizable):
+    _enc = ['name', 'details']
+    __tablename__ = 'experiment'
+    name = Column(String(255), primary_key=True, nullable=False)
+*   details = Column(JSONColumn())
+
+class DetailsTxt(JSONizable):
+    _enc = ['text']
+    def __init__(self, text):
+        self.text = text
+
+tests = [
+    Experiment(name='with text',
+               details=DetailsTxt('the text')),
+    Experiment(name='with number',
+               details=DetailsNum(1234))
+]
+```
+
+---
+
+## SQLAlchemy
+
+```
+engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+SqlBase.metadata.create_all(engine)
+
+with Session(engine) as session:
+    session.bulk_save_objects(tests)
+    session.commit()
+
+print('selecting back')
+with Session(engine) as session:
+    for (i, r) in enumerate(session.execute(select(Experiment))):
+        print('..', i, r[0])
+```
+```console
+selecting back
+.. 0 <Experiment name="with text" details=<Text text="the text">>
+.. 1 <Experiment name="with number" details=<Number number=1234>>
+```
+
+---
+
+## Using Pydantic
+
+- [Pydantic][pydantic] is a data parsing and validation library
+
+```python
+from pydantic import BaseModel, ValidationError
+
+class Encoder(json.JSONEncoder):
+    def default(self, obj):
+*       if isinstance(obj, BaseModel):
+*           class_name = obj.__class__.__name__
+*           obj = obj.dict()
+*           obj[JSON_CLS] = class_name
+        elif isinstance(obj, SqlBase):
+            columns = obj.__table__.columns.keys()
+            class_name = obj.__class__.__name__
+            obj = {key:getattr(obj, key) for key in columns}
+            obj[JSON_CLS] = class_name
+        else:
+            return json.JSONEncoder.default(self, obj)
+        return obj
+```
+
+---
+
+## Using Pydantic
+
+```python
+class ExperimentSql(SqlBase):
+    __tablename__ = 'experiment'
+    name = Column(String(255), primary_key=True, nullable=False)
+    details = Column(JSONColumn())
+
+class DetailsTxt(BaseModel):
+    text: str
+
+
+class DetailsNum(BaseModel):
+    number: int
+
+try:
+    DetailsNum(number='not a number')
+except ValidationError as e:
+    print('trying to create invalid Pydantic field:', e)
+```
+```console
+trying to create invalid Pydantic field: 1 validation error for DetailsNum
+number
+  value is not a valid integer (type=type_error.integer)
+```
+
+---
+
+## Using Pydantic
+
+```python
+    tests = [
+        ExperimentSql(name='with text', details=DetailsTxt(text='the text')),
+        ExperimentSql(name='with number', details=DetailsNum(number=1234))
+    ]
+
+    with Session(engine) as session:
+        session.bulk_save_objects(tests)
+        session.commit()
+
+    print('SQL direct selection')
+    with Session(engine) as session:
+        for (i, row) in enumerate(session.execute(select(ExperimentSql))):
+            print('..', i, row[0])
+```
+```console
+SQL direct selection
+.. 0 <ExperimentSql name="with text" details=text='the text'>
+.. 1 <ExperimentSql name="with number" details=number=1234>
+```
+
+---
+
+## Using Pydantic
+
+```python
+# Test direct construction and conversion.
+temp = ExperimentSql(name='temp', details=DetailsNum(number=5678))
+print('temp originally constructed', temp)
+*temp_as_pydantic = ExperimentModel.from_orm(temp)
+print('temp constructed by Pydantic', temp_as_pydantic)
+```
+```console
+temp originally constructed <ExperimentSql name="temp" details=number=5678>
+temp constructed by Pydantic <ExperimentModel name="temp" details=number=5678>
+```
+
+---
+
+## Using PostgreSQL
+
+```python
+SqlBase = declarative_base()
+class Experiment(SqlBase):
+    __tablename__ = 'experiments'
+    name = Column(String, primary_key=True)
+    details = Column(JSONB)
+
+with Session(engine) as session:
+    session.add(
+        Experiment(name='first',
+                   details={'scientist': 'Marie Curie',
+                            'year': 1903})
+    )
+    session.add(
+        Experiment(name='second',
+                   details={'scientist': 'Barbara McClintock',
+                            'year': 1983})
+    )
+    session.commit()
+```
+
+---
+
+## Using PostgreSQL
+
+```python
+with Session(engine) as session:
+    temp = session.execute(select(Experiment)\
+           .where(Experiment.name == 'second'))
+    show('SQL filtering', temp)
+```
+```console
+SQL filtering
+.. (Experiment name="second" details={'year': 1983, 'scientist': 'Barbara McClintock'},)
+```
+
+```python
+with Session(engine) as session:
+    temp = session.execute(select(Experiment)\
+           .where(Experiment.details['scientist'].astext == 'Marie Curie'))
+    show('JSON filtering:', temp)
+```
+```console
+JSON filtering:
+.. (Experiment name="first" details={'year': 1903, 'scientist': 'Marie Curie'},)
+```
+
+---
+
+## Using views
+
+- An add-on package for SQLAlchemy
+
+```python
+view_table = Table('all_names', MetaData())
+drop_view = DropView(view_table, if_exists=True)
+create_view = CreateView(view_table, text('select name from experiments')).compile()
+with Session(engine) as session:
+    session.execute(str(drop_view))
+    session.execute(str(create_view))
+    session.commit()
+
+with Session(engine) as session:
+    temp = session.execute(text('select * from all_names'))
+    show('names:', temp)
+```
+
+```console
+names:
+.. ('first',)
+.. ('second',)
+```
+
+---
+
+## Using views
+
+```python
+v = "create view years as select details->>'year' as y from experiments"
+with Session(engine) as session:
+    session.execute(text("drop view if exists years"))
+    session.execute(text(v))
+    session.commit()
+
+with Session(engine) as session:
+    temp = session.execute(text("select * from years"))
+    show('years:', temp)
+```
+```console
+years:
+.. ('1903',)
+.. ('1983',)
+```
+
+---
+
+## Flattening
+
+```python
+with Session(engine) as session:
+    session.add(
+        Experiment(name='first',
+                   details=[
+                       {'color': 'red'},
+                       {'color': 'orange'}
+                   ])
+    )
+    session.add(
+        Experiment(name='second',
+                   details=[
+                       {'color': 'green'},
+                       {'color': 'blue'}
+                   ])
+    )
+    session.commit()
+```
+
+---
+
+## Flattening
+
+```python
+v = '''create view colors as
+       select name, jsonb_array_elements(details)->>'color' as d
+       from experiments'''
+...make sure view is created...
+
+with Session(engine) as session:
+    temp = session.execute(text("select * from colors"))
+    show('flattened colors:', temp)
+```
+```console
+flattened colors:
+.. ('first', 'red')
+.. ('first', 'orange')
+.. ('second', 'green')
+.. ('second', 'blue')
+```
+
+---
+
+##  Conclusion
+
+- PostgreSQL is technically viable
+- Probably worth evaluating [Django][django] ORM
+
+[django]: https://www.djangoproject.com/
+[firestore]: https://firebase.google.com/docs/firestore
+[postgress-app]: https://postgresapp.com/
+[postgresql]: https://www.postgresql.org/
+[postgresql-mac]: https://www.postgresql.org/download/macosx/
+[pydantic]: https://pydantic-docs.helpmanual.io/
