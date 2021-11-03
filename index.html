@@ -298,6 +298,13 @@ SQL direct selection
 ## Using Pydantic
 
 ```python
+# I am not happy about this part...
+class ExperimentModel(BaseModel):
+    name: str
+    details: Any
+    class Config:
+        orm_mode = True
+
 # Test direct construction and conversion.
 temp = ExperimentSql(name='temp', details=DetailsNum(number=5678))
 print('temp originally constructed', temp)
@@ -457,11 +464,15 @@ flattened colors:
 ##  Conclusion
 
 - PostgreSQL is technically viable
-- Probably worth evaluating [Django][django] ORM
+- Need to:
+  - Evaluate [Django][django] ORM (?)
+  - Write one migration using [Alembic][alembic]
+  - See if it's possible to avoid defining classes twice (once for SQLAlchemy and once for Pydantic)
 
+[alembic]: https://alembic.sqlalchemy.org/
 [django]: https://www.djangoproject.com/
 [firestore]: https://firebase.google.com/docs/firestore
-[postgress-app]: https://postgresapp.com/
+[postgres-app]: https://postgresapp.com/
 [postgresql]: https://www.postgresql.org/
 [postgresql-mac]: https://www.postgresql.org/download/macosx/
 [pydantic]: https://pydantic-docs.helpmanual.io/
