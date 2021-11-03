@@ -1,3 +1,4 @@
 - `\l` to list available databases
 - `\c db` to change to database
 - `\dt` to display tables
+- `\dv` to display views

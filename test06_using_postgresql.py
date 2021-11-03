@@ -46,14 +46,14 @@ with Session(engine) as session:
         Experiment(name='first',
                    details={
                        'scientist': 'Marie Curie',
-                       'details': 'first details'
+                       'year': 1903
                    })
     )
     session.add(
         Experiment(name='second',
                    details={
                        'scientist': 'Barbara McClintock',
-                       'details': 'second details'
+                       'year': 1983
                    })
     )
     session.commit()
