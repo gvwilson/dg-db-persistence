@@ -7,13 +7,15 @@ SQLite (in memory for testing) and PostgreSQL (for production). It
 also shows how we do bulk import for data migration. Imports are mixed
 with functions and running code for tutorial purposes."""
 
-import json
 import sys
+import pytest
 
 # ----------------------------------------------------------------------
 
 # We need to handle complex types like datetimes, which means providing
 # hooks for JSON persistence.
+
+import json
 
 JSON_TIMESTAMP_KEY = '_timestamp_'
 
@@ -41,18 +43,17 @@ def json_load(text):
     """Convert JSON string to object, handling timestamps etc."""
     return json.loads(text, object_hook=_json_decoder)
 
-# Create a base class for domain entities that:
-# - has a unique ID field
-# - can persist itself as a dictionary and as a JSON string
-# - can restore itself from a dictionary or from a JSON string
-#
-# Persistence to and from JSON uses the hooks defined above.
-# Persistence to JSON string takes an extra argument `replace`
-# which is ignored here, but which will be used to trigger
-# replacement of contained objects with their UIDs in parent
-# classes. Reconstruction from JSON takes a list of objects
-# (which must have `uid` fields) and matches them to the UID
-# values in the sub-object list.
+# Create a base class for domain entities that has a unique ID
+# field and persist to/from dictionaries and JSON strings.
+# - Persistence to and from JSON uses the hooks defined above.
+# - Persistence to JSON string takes an extra argument `replace`
+#   which is ignored here, but which will be used to trigger
+#   replacement of contained objects with their UIDs in parent
+#   classes.
+# - Reconstruction from JSON takes a list of objects (which must
+#   have `uid` fields) and matches them to the UID values in the
+#   sub-object list.
+# - We make it an abstract base class to be consistent with NexusPy.
 
 from abc import ABC
 from dataclasses import asdict, dataclass
@@ -113,10 +114,10 @@ class ChildRecord(DomainEntity):
     when: datetime
 
 def test_child_record_dict_json():
-    then = datetime(2019, 1, 2, 3, 4, 5)
-    rec = ChildRecord(uid="child01", when=then)
+    when = datetime(2019, 1, 2, 3, 4, 5)
+    rec = ChildRecord(uid="child01", when=when)
     as_dict = rec.to_dict()
-    assert as_dict == {"uid": "child01", "when": then}
+    assert as_dict == {"uid": "child01", "when": when}
 
     restored = ChildRecord.from_dict(as_dict)
     assert restored == rec
@@ -185,3 +186,177 @@ def test_parent_record_dict_json():
     assert as_json_with_replace == '{"children": ["child01", "child02"], "name": "parent", "uid": "parent01"}'
     restored = ParentRecord.from_json(as_json_with_replace, [first_child, second_child])
     assert restored == parent
+
+# ----------------------------------------------------------------------
+
+# Persist a plain JSON blob to and from a SQLite database.
+
+from sqlalchemy import create_engine, select, Column, String, TIMESTAMP
+from sqlalchemy.orm import declarative_base, Session
+from sqlalchemy.types import JSON
+
+SqlBase = declarative_base()
+
+@pytest.fixture
+def engine():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    SqlBase.metadata.create_all(engine)
+    return engine
+
+class PlainJsonDB(SqlBase):
+    __tablename__ = "plainjson"
+    uid = Column(String(255), primary_key=True, nullable=False)
+    data = Column(JSON)
+
+    def __eq__(self, other):
+        return (self.uid == other.uid) and (self.data == other.data)
+
+    def __str__(self):
+        return f"<PlainJsonDB/{self.uid}/{self.data}>"
+
+def test_plain_json_db(engine):
+    data = {"key": "value"}
+
+    with Session(engine) as session:
+        rec = PlainJsonDB(uid="plain01", data=data)
+        session.add(rec)
+        restored = session.query(PlainJsonDB).all()
+        assert len(restored) == 1
+        assert restored[0] == rec
+        session.close()
+
+# It's a little tricky to test SQLAlchemy because we have to compare
+# objects within the scope of the session to avoid
+# https://docs.sqlalchemy.org/en/14/errors.html#error-bhk3.  That's OK
+# because `data` is all we really need, so let's simulate the
+# functions we'd actually use.
+
+def plainCreate(engine, data):
+    with Session(engine) as session:
+        rec = PlainJsonDB(uid=data["uid"], data=data)
+        session.add(rec)
+        session.commit()
+
+def plainGet(engine, uid):
+    with Session(engine) as session:
+        results = session.query(PlainJsonDB)\
+                         .filter(PlainJsonDB.uid == uid)\
+                         .all()
+        assert len(results) == 1
+        return results[0].data
+
+def plainExists(engine, uid):
+    with Session(engine) as session:
+        results = session.query(PlainJsonDB)\
+                         .filter(PlainJsonDB.uid == uid)\
+                         .all()
+        return len(results) == 1
+
+def test_plain_json_session_scoping(engine):
+    original = {"uid": "plain01", "key": "value"}
+    plainCreate(engine, original)
+
+    restored = plainGet(engine, "plain01")
+    assert restored == original
+
+    assert plainExists(engine, "plain01")
+    assert not plainExists(engine, "something else")
+
+# Flat record persistence is a fairly straightforward extension of
+# plain JSON.
+# - We add a `created_at` field to the database, which is part of the
+#   primary key.
+# - We also add an `archived_at` field, which is `NULL` for the "active"
+#   version of the record (at most one).
+# - We have to do the object-to-dict conversion to handle complex types
+#   like timestamps in the JSON blobs.
+
+class FlatRecordDB(SqlBase):
+    __tablename__ = "flatrecord"
+    uid = Column(String(255), primary_key=True, nullable=False)
+    data = Column(JSON)
+    created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
+    archived_at = Column(TIMESTAMP)
+
+    def __eq__(self, other):
+        return (self.uid == other.uid) \
+            and (self.data == other.data) \
+            and (self.created_at == other.created_at) \
+            and (self.archived_at == other.archived_at)
+
+    def __str__(self):
+        return f"<FlatRecordDB/{self.uid}/{self.data}/{self.created_at}/{self.archived_at}>"
+
+def flatRecordCreate(engine, obj, when=None):
+    when = when if (when is not None) else datetime.now() # to support testing
+    as_dict = obj.to_dict()
+    with Session(engine) as session:
+        rec = FlatRecordDB(uid=as_dict["uid"], data=as_dict, created_at=when, archived_at=None)
+        session.add(rec)
+        session.commit()
+
+def flatRecordGet(engine, uid, cls, archived=False):
+    with Session(engine) as session:
+        query = session.query(FlatRecordDB)\
+                       .filter(FlatRecordDB.uid == uid)
+        if not archived:
+            query = query.filter(FlatRecordDB.archived_at == None)
+        results = query.all()
+        assert len(results) == 1
+        return cls.from_dict(results[0].data)
+
+def flatRecordGetAll(engine, cls):
+    with Session(engine) as session:
+        query = session.query(FlatRecordDB)
+        results = query.all()
+        return [cls.from_dict(r.data) for r in results]
+
+def flatRecordExists(engine, uid, archived=False):
+    with Session(engine) as session:
+        query = session.query(FlatRecordDB)\
+                       .filter(FlatRecordDB.uid == uid)
+        if not archived:
+            query = query.filter(FlatRecordDB.archived_at == None)
+        results = query.all()
+        return len(results) > 0
+
+def flatRecordArchive(engine, uid, when=None):
+    when = when if (when is not None) else datetime.now() # to support testing
+    with Session(engine) as session:
+        check = session.query(FlatRecordDB)\
+                       .filter(FlatRecordDB.uid == uid)\
+                       .filter(FlatRecordDB.archived_at is not None)
+        results = check.all()
+        assert len(results) == 1
+        query = session.query(FlatRecordDB)\
+                       .filter(FlatRecordDB.uid == uid)\
+                       .filter(FlatRecordDB.archived_at is not None)\
+                       .update({"archived_at": when})
+        session.commit()
+        return when
+
+def test_flat_record_persistence(engine):
+    original = FlatRecord(uid="flat01", name="flat", count=3)
+    flatRecordCreate(engine, original)
+
+    restored = flatRecordGet(engine, "flat01", FlatRecord)
+    assert restored == original
+
+    assert flatRecordExists(engine, "flat01")
+    assert not flatRecordExists(engine, "something else")
+
+def test_flat_record_archiving(engine):
+    first = FlatRecord(uid="flat01", name="flat", count=3)
+    flatRecordCreate(engine, first)
+    assert flatRecordExists(engine, "flat01")
+
+    now = datetime.now()
+    assert flatRecordArchive(engine, "flat01", when=now) == now
+
+    assert not flatRecordExists(engine, "flat01")
+    assert flatRecordExists(engine, "flat01", True)
+
+    second = FlatRecord(uid="flat01", name="flat", count=5)
+    flatRecordCreate(engine, second)
+    assert flatRecordExists(engine, "flat01")
+    assert flatRecordGet(engine, "flat01", FlatRecord) == second
