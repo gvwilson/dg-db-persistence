@@ -37,9 +37,6 @@ def test_conversion_string_only():
     assert obj.to_dict() == expected_dict
     assert ConversionStringOnly.from_dict(expected_dict) == obj
 
-    assert obj.to_json() == expected_str
-    assert ConversionStringOnly.from_json(expected_str) == obj
-
 @dataclass_json
 @dataclass
 class ConversionStringAndDatetime():
@@ -87,13 +84,15 @@ def test_conversion_nested():
 # - So we use `_nexus_` in the names of all the other methods to
 #   be clear.
 
+from typing import List
+
 @dataclass_json
 @dataclass
 class DomainEntity:
     uid: str
 
     @classmethod
-    def from_nexus_dict(cls, src: dict):
+    def from_nexus_dict(cls, src: dict, children: List=None):
         return cls.from_dict(src)
 
     def to_nexus_dict(self, replace_uid=False) -> dict:
@@ -309,25 +308,25 @@ from datetime import datetime
 @dataclass_json
 @dataclass
 class ChildRecord(DomainEntity):
-    when: datetime
+    when: datetime = field(
+        metadata=config(
+            encoder=datetime.isoformat,
+            decoder=datetime.fromisoformat
+        ))
 
 def test_child_dict():
     when = datetime(2019, 1, 2, 3, 4, 5)
+    expected = {"uid": "child01", "when": when.isoformat()}
     rec = ChildRecord(uid="child01", when=when)
     as_dict = rec.to_dict()
-    assert as_dict == {"uid": "child01", "when": when}
+    assert as_dict == expected
 
     restored = ChildRecord.from_dict(as_dict)
     assert restored == rec
 
-# HERE
-    
-# A parent record contains a list of child records that need
-# to be persisted separately (e.g., `LuciferaseExperiment` and
-# its samples).
+# A parent record contains a list of child records that need to be
+# persisted separately (e.g., `LuciferaseExperiment` and its samples).
 # - We have to reconstitute the children in `from_dict` ourselves.
-# - We implement the `replace_uid` parameter of `to_json`, so `children`
-#   can hold either `ChildRecord` or `str` (UIDs).
 
 from typing import List, Union
 
@@ -338,28 +337,24 @@ class ParentRecord(DomainEntity):
     children: List[Union[ChildRecord, str]]
 
     @classmethod
-    def from_dict(cls, src: dict):
+    def from_nexus_dict(cls, src: dict, children: List=None):
         result = cls(**src)
-        result.children = [c if isinstance(c, ChildRecord) else ChildRecord(**c)
-                           for c in result.children]
+        if children:
+            assert all(isinstance(c, str) for c in result.children), \
+                "Cannot use non-string values to look up children by UID"
+            by_uid = {c.uid:c for c in children}
+            result.children = [by_uid[c] for c in result.children]
+        else:
+            assert all(isinstance(c, dict) for c in result.children), \
+                "Cannot convert non-dict to child"
+            result.children = [ChildRecord.from_nexus_dict(c) for c in result.children]
         return result
 
-    def to_dict(self, replace_uid=False) -> dict:
-        temp = asdict(self)
+    def to_nexus_dict(self, replace_uid=False) -> dict:
+        temp = self.to_dict()
         if replace_uid:
             temp["children"] = [c["uid"] for c in temp["children"]]
         return temp
-
-    def to_json(self, replace_uid=False) -> str:
-        return json_dump(self.to_dict(replace_uid))
-
-    @classmethod
-    def from_json(cls, src: str, contained=None):
-        temp = json_load(src)
-        if contained is not None:
-            contained = {c.uid: c for c in contained}
-            temp["children"] = [contained[c] for c in temp["children"]]
-        return cls.from_dict(temp)
 
 @pytest.fixture
 def first_time():
@@ -377,28 +372,28 @@ def first_child(first_time):
 def second_child(second_time):
     return ChildRecord(uid="child02", when=second_time)
 
-@pytest.fixture
-def parent(first_child, second_child):
-    return ParentRecord(uid="parent01", name="parent", children=[first_child, second_child])
-
-def test_parent_record_dict_json(first_time, second_time, first_child, second_child, parent):
-    as_dict = parent.to_dict()
-    assert as_dict == {"uid": "parent01", "name": "parent", "children": [
-        {"uid": "child01", "when": first_time},
-        {"uid": "child02", "when": second_time}
+def test_parent_dict_no_replacement(first_time, second_time, first_child, second_child):
+    parent = ParentRecord(uid="parent01", name="parent", children=[first_child, second_child])
+    expected = {"uid": "parent01", "name": "parent", "children": [
+        {"uid": "child01", "when": first_time.isoformat()},
+        {"uid": "child02", "when": second_time.isoformat()}
     ]}
-    restored = ParentRecord.from_dict(as_dict)
+    as_dict = parent.to_nexus_dict()
+    assert as_dict == expected
+
+    restored = ParentRecord.from_nexus_dict(as_dict)
     assert restored == parent
 
-    as_json_no_replace = parent.to_json(False)
-    assert as_json_no_replace == '{"children": [{"uid": "child01", "when": {"_timestamp_": "2019-01-02T03:04:05"}}, {"uid": "child02", "when": {"_timestamp_": "2020-06-07T08:09:00"}}], "name": "parent", "uid": "parent01"}'
-    restored = ParentRecord.from_json(as_json_no_replace)
-    assert restored == parent
+def test_parent_dict_with_replacement(first_time, second_time, first_child, second_child):
+    parent = ParentRecord(uid="parent01", name="parent", children=[first_child, second_child])
+    expected = {"uid": "parent01", "name": "parent", "children": ["child01", "child02"]}
 
-    as_json_with_replace = parent.to_json(True)
-    assert as_json_with_replace == '{"children": ["child01", "child02"], "name": "parent", "uid": "parent01"}'
-    restored = ParentRecord.from_json(as_json_with_replace, [first_child, second_child])
+    as_dict = parent.to_nexus_dict(replace_uid=True)
+    assert as_dict == expected
+
+    restored = ParentRecord.from_nexus_dict(as_dict, [first_child, second_child])
     assert restored == parent
+    assert all(isinstance(c, ChildRecord) for c in restored.children)
 
 # ----------------------------------------------------------------------
 
