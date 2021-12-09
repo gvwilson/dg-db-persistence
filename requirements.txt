@@ -1,3 +1,4 @@
+dataclasses-json
 protobuf
 protobuf2pydantic
 psycopg2
