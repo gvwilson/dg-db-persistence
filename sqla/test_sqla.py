@@ -196,12 +196,15 @@ def test_plain_json_session_scoping(engine):
 #   version of the record (at most one).
 # - We do the object-dict conversion when creating an object.
 
+from sqlalchemy import UniqueConstraint
+
 class FlatEntityDB(SqlBase):
     __tablename__ = "flat_table"
     uid = Column(String(16), primary_key=True, nullable=False)
     data = Column(JSON)
     created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
     archived_at = Column(TIMESTAMP)
+    __table_args__ = (UniqueConstraint('uid', 'created_at', name='flat_entity_uid_created_at_unique'),)
 
     def __eq__(self, other):
         return (self.uid == other.uid) \
@@ -282,20 +285,22 @@ def test_flat_persistence(engine):
     assert not flatEntityExists(engine, "something else")
 
 def test_flat_archiving(engine):
-    first = FlatEntity(uid="flat01", name="flat", count=3)
-    flatEntityCreate(engine, first)
+    original = FlatEntity(uid="flat01", name="flat", count=3)
+    long_ago = datetime(2011, 1, 1, 1, 1, 1)
+    flatEntityCreate(engine, original, when=long_ago)
     assert flatEntityExists(engine, "flat01")
 
-    now = datetime.now()
-    assert flatEntityArchive(engine, "flat01", when=now) == now
+    recently = datetime(2012, 2, 2, 2, 2, 2)
+    assert flatEntityArchive(engine, "flat01", when=recently) == recently
 
     assert not flatEntityExists(engine, "flat01")
     assert flatEntityExists(engine, "flat01", True)
 
-    second = FlatEntity(uid="flat01", name="flat", count=5)
-    flatEntityCreate(engine, second)
+    replacement = FlatEntity(uid="flat01", name="flat", count=5)
+    now = datetime(2021, 12, 12, 12, 12, 12)
+    flatEntityCreate(engine, replacement, when=now)
     assert flatEntityExists(engine, "flat01")
-    assert flatEntityGet(engine, "flat01", FlatEntity) == second
+    assert flatEntityGet(engine, "flat01", FlatEntity) == replacement
 
 # ----------------------------------------------------------------------
 
@@ -407,8 +412,14 @@ def test_parent_dict_with_replacement(first_time, second_time, first_child, seco
 # To achieve this, we need two things to `ChildDB`:
 # - `parent_id` creates the foreign key into `ParentDB`
 # - `parent` defines the relationship (and back ref) to the application
+#
+# Since the parent's primary key has two parts, we have to use
+# `ForeignKeyConstraint` instead of the simpler `ForeignKey`: see
+# https://docs.sqlalchemy.org/en/14/core/constraints.html?highlight=foreignkeyconstraint#metadata-foreignkeys
+# for details.
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey # FIXME
+from sqlalchemy import ForeignKeyConstraint
 from sqlalchemy.orm import relationship
 
 class ParentDB(SqlBase):
@@ -417,6 +428,9 @@ class ParentDB(SqlBase):
     data = Column(JSON)
     created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
     archived_at = Column(TIMESTAMP)
+    __table_args__ = (
+        UniqueConstraint('uid', 'created_at', name='parent_db_uid_created_at_unique'),
+    )
 
 class ChildDB(SqlBase):
     __tablename__ = "child_table"
@@ -425,11 +439,18 @@ class ChildDB(SqlBase):
     data = Column(JSON)
     archived_at = Column(TIMESTAMP)
 
-    parent_id = Column(String(16), ForeignKey("parent_table.uid"))
+    parent_uid = Column(String(16))
+    parent_created_at = Column(TIMESTAMP)
     parent = relationship("ParentDB", backref="child")
 
+    __table_args__ = (
+        UniqueConstraint('uid', 'created_at', name='child_db_uid_created_at_unique'),
+        ForeignKeyConstraint(["parent_uid", "parent_created_at"],
+                             ["parent_table.uid", "parent_table.created_at"])
+    )
+
     def __str__(self):
-        return f"<ChildDB {self.uid}/{self.data}/@{self.parent_id}>"
+        return f"<ChildDB {self.uid}/{self.data}/@{self.parent_uid}>"
 
 def test_parent_child_relationship(engine):
     with Session(engine) as session:
@@ -437,16 +458,16 @@ def test_parent_child_relationship(engine):
         p = ParentDB(uid="p123", created_at=when, data={"parent": "data"})
         session.add(p)
         first = ChildDB(uid="c01", created_at=when, data={"child": "first"},
-                        parent_id="p123")
+                        parent_uid="p123", parent_created_at=when)
         session.add(first)
         second = ChildDB(uid="c02", created_at=when, data={"child": "second"},
-                        parent_id="p123")
+                         parent_uid="p123", parent_created_at=when)
         session.add(second)
         session.commit()
 
     with Session(engine) as session:
         records = session.query(ParentDB)\
-            .join(ChildDB, ParentDB.uid == ChildDB.parent_id)\
+            .join(ChildDB, ParentDB.uid == ChildDB.parent_uid)\
             .filter(ChildDB.uid == "c01")\
             .all()
         assert len(records) == 1
@@ -498,6 +519,9 @@ class LuciferaseDB(SqlBase):
     data = Column(JSON)
     created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
     archived_at = Column(TIMESTAMP)
+    __table_args__ = (
+        UniqueConstraint('uid', 'created_at', name='luciferase_uid_created_at_unique'),
+    )
 
     def __str__(self):
         return f"<LuciferaseDB {self.uid}/{self.data}>"
@@ -510,11 +534,18 @@ class SampleDB(SqlBase):
     data = Column(JSON)
     archived_at = Column(TIMESTAMP)
 
-    luciferase_id = Column(String(16), ForeignKey("luciferase_table.uid"))
-    luciferase = relationship("LuciferaseDB", backref="sample")
+    luciferase_uid = Column(String(16))
+    luciferase_created_at = Column(TIMESTAMP)
+    parent = relationship("LuciferaseDB", backref="child")
+
+    __table_args__ = (
+        UniqueConstraint('uid', 'created_at', name='sample_db_uid_created_at_unique'),
+        ForeignKeyConstraint(["luciferase_uid", "luciferase_created_at"],
+                             ["luciferase_table.uid", "luciferase_table.created_at"])
+    )
 
     def __str__(self):
-        return f"<SampleDB {self.uid}/{self.data}/@{self.luciferase_id}>"
+        return f"<SampleDB {self.uid}/{self.data}/@{self.luciferase_uid}>"
 
 # Create a database record, replacing contained samples with their IDs
 # in the luciferase JSON record and saving the samples separately.
@@ -527,7 +558,7 @@ def dbLuciferaseCreate(engine, luc, when=None):
         session.add(rec)
         for sample in sample_dicts:
             rec = SampleDB(uid=sample["uid"], data=sample, created_at=when,
-                           luciferase_id=luc_dict["uid"])
+                           luciferase_uid=luc_dict["uid"])
             session.add(rec)
         session.commit()
 
@@ -539,7 +570,7 @@ def dbLuciferaseCreate(engine, luc, when=None):
 def dbLuciferaseGet(engine, uid, archived=False):
     with Session(engine) as session:
         query = session.query(SampleDB)\
-            .filter(SampleDB.luciferase_id == uid)
+            .filter(SampleDB.luciferase_uid == uid)
         if not archived:
             query = query.filter(SampleDB.archived_at == None)
         samples = query.all()
@@ -575,6 +606,42 @@ def test_luciferase(engine):
 
     # Test our own getter
     recovered = dbLuciferaseGet(engine, "luc987")
+    assert isinstance(recovered, LuciferaseEntity)
+    assert recovered.uid == "luc987"
+    assert recovered.name == "luci"
+    assert len(recovered.samples) == 1
+    assert isinstance(recovered.samples[0], SampleEntity)
+    assert recovered.samples[0].uid == "sample0001"
+
+# ----------------------------------------------------------------------
+
+# Does this work with PostgreSQL? This code assumes PostgreSQL is running
+# locally, that you are logged in as <NAME>, and that there is a database
+# called <NAME>.
+
+from conftest import skip_psql_tests
+import os
+import pwd
+
+@pytest.fixture
+def psql_engine():
+    username = pwd.getpwuid(os.getuid()).pw_name
+    engine = create_engine(f"postgresql://{username}:@localhost:5432/{username}", future=True)
+    SampleDB.__table__.drop(engine, checkfirst=True)
+    LuciferaseDB.__table__.drop(engine, checkfirst=True)
+    LuciferaseDB.__table__.create(engine)
+    SampleDB.__table__.create(engine)
+    return engine
+
+@pytest.mark.skipif(skip_psql_tests, reason="You told me to")
+def test_psql(psql_engine):
+    when = datetime(2021, 12, 15, 7, 7, 7)
+    sample = SampleEntity(uid="sample0001", measure=123)
+    luc = LuciferaseEntity(uid="luc987", name="luci", samples=[sample])
+
+    dbLuciferaseCreate(psql_engine, luc, when)
+    recovered = dbLuciferaseGet(psql_engine, "luc987")
+
     assert isinstance(recovered, LuciferaseEntity)
     assert recovered.uid == "luc987"
     assert recovered.name == "luci"
