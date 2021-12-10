@@ -2,40 +2,29 @@
 
 """Persistence demo.
 
-This demo shows how NexusPy uses Pydantic + SQLAlchemy to persist to
-SQLite (in memory for testing) and PostgreSQL (for production). It
+This demo shows how NexusPy uses dataclasses + SQLAlchemy to persist
+to SQLite (in memory for testing) and PostgreSQL (for production). It
 also shows how we do bulk import for data migration. Imports are mixed
-with functions and running code for tutorial purposes."""
+with functions and running code for tutorial purposes.
+"""
 
 import sys
 import pytest
 
 # ----------------------------------------------------------------------
 
-# We need to handle timestamps in objects (and in future may need to handle
-# other types as well). Doing this with `dataclasses.asdict` proved difficult
-# (the `dict_factory` that `asdict` takes doesn't do what we need). Luckily,
-# there is a package called `dataclasses-json` that does. If we stack the
-# `@dataclass_json` decorator on top of the `@dataclass` decorator and
-# declare `datetime` fields using `field` and `config` as shown below, we get
-# the conversion machinery we need.
+# We need to handle timestamps in objects (and in future may need to
+# handle other types as well). Doing this with `dataclasses.asdict`
+# didn't work: its `dict_factory` parameter doesn't do what we
+# need. Luckily, there is a package called `dataclasses-json` that
+# handles stuff correctly. If we stack the `@dataclass_json` decorator
+# on top of the `@dataclass` decorator and declare `datetime` fields
+# using `field` and `config` as shown below, we get the conversion
+# machinery we need.
 
 from datetime import datetime
 from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json, config
-
-@dataclass_json
-@dataclass
-class ConversionStringOnly():
-    uid: str
-
-def test_conversion_string_only():
-    obj = ConversionStringOnly(uid="abc123")
-    expected_dict = {"uid": "abc123"}
-    expected_str = '{"uid": "abc123"}'
-
-    assert obj.to_dict() == expected_dict
-    assert ConversionStringOnly.from_dict(expected_dict) == obj
 
 @dataclass_json
 @dataclass
@@ -50,7 +39,7 @@ class ConversionStringAndDatetime():
 def test_conversion_with_datetime():
     now = datetime(2021, 12, 5, 1, 2, 3)
     obj = ConversionStringAndDatetime(uid="abc123", when=now)
-    expected_dict = {'uid': 'abc123', 'when': '2021-12-05T01:02:03'}
+    expected_dict = {"uid": "abc123", "when": "2021-12-05T01:02:03"}
 
     assert obj.to_dict() == expected_dict
     assert ConversionStringAndDatetime.from_dict(expected_dict) == obj
@@ -64,7 +53,7 @@ class ConversionNested():
 def test_conversion_nested():
     now = datetime(2021, 12, 6, 7, 8, 9)
     obj = ConversionNested(uid="abc123", child=ConversionStringAndDatetime(uid="pqr789", when=now))
-    expected_dict = {'uid': 'abc123', 'child': {'uid': 'pqr789', 'when': '2021-12-06T07:08:09'}}
+    expected_dict = {"uid": "abc123", "child": {"uid": "pqr789", "when": "2021-12-06T07:08:09"}}
 
     assert obj.to_dict() == expected_dict
     assert ConversionNested.from_dict(expected_dict) == obj
@@ -75,14 +64,13 @@ def test_conversion_nested():
 # field and persist to/from dictionaries and JSON strings.
 # - Persistence takes an extra argument `replace_uid` which is
 #   ignored here, but which will be used to trigger replacement
-#   of contained objects with their UIDs in some derived classes.
-# - Reconstruction from JSON takes a list of objects (which must
+#   of contained objects with their UIDs in derived classes.
+# - Reconstruction from JSON can take a list of objects (which must
 #   have `uid` fields) and matches them to the UID values in the
 #   sub-object list.
-# - We use names like `to_nexus_dict` because `@dataclass_json`
-#   creates `to_dict` on this class, and we can't upcall to it.
-# - So we use `_nexus_` in the names of all the other methods to
-#   be clear.
+# - We use the names `to_nexus_dict` and `from_nexus_dict` because
+#   `@dataclass_json` creates `to_dict` and `from_dict` directly on
+#   this class, so we can't upcall to an inherited version.
 
 from typing import List
 
@@ -98,10 +86,10 @@ class DomainEntity:
     def to_nexus_dict(self, replace_uid=False) -> dict:
         return self.to_dict()
 
-# A flat record does not contain sub-objects that need to be persisted
-# separately (e.g., `CellLine`). It has a name and a count so that we
-# can test uniqueness constraints.  Note that we have to repeat the
-# decorators even though it derives from `DomainEntity`..
+# Let's test this with a flat record that does not contain sub-objects
+# that need to be persisted separately (similar to `CellLine`). Note
+# that we have to repeat the decorators even though it derives from
+# `DomainEntity` so that `name` and `count` will be registered.
 
 @dataclass_json
 @dataclass
@@ -119,21 +107,27 @@ def test_entity_nexus_dict():
 
 # ----------------------------------------------------------------------
 
-# Persist a plain JSON blob to and from a SQLite database.  No
-# DomainEntity stuff is involved here: we'll connect the two later.
+# Persist a plain JSON blob to and from a database using SQLAlchemy.
+# No DomainEntity stuff is involved here: we'll connect that up later.
 
 from sqlalchemy import create_engine, select, Column, String, TIMESTAMP
 from sqlalchemy.orm import declarative_base, Session
 from sqlalchemy.types import JSON
 
+# The base class from which all SQLAlchemy classes must derive.
 SqlBase = declarative_base()
 
+# Create a fresh in-memory database for each test using a fixture.
 @pytest.fixture
 def engine():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     SqlBase.metadata.create_all(engine)
     return engine
 
+# Let's persist some JSON. In production, we're going to put this
+# class and others like it in a conditional load because we need
+# slightly different types and queries for SQLite and PostgreSQL
+# (because JSON handling isn't part of the standard.)
 class PlainJsonDB(SqlBase):
     __tablename__ = "plainjson"
     uid = Column(String(16), primary_key=True, nullable=False)
@@ -147,7 +141,6 @@ class PlainJsonDB(SqlBase):
 
 def test_plain_json_db(engine):
     data = {"key": "value"}
-
     with Session(engine) as session:
         rec = PlainJsonDB(uid="plain01", data=data)
         session.add(rec)
@@ -195,15 +188,13 @@ def test_plain_json_session_scoping(engine):
 
 # ----------------------------------------------------------------------
     
-# Flat entity database persistence is a fairly straightforward extension of
-# plain JSON.
+# Flat entity database persistence is a straightforward combination of
+# the things we've built so far.
 # - We add a `created_at` field to the database, which is part of the
 #   primary key.
 # - We also add an `archived_at` field, which is `NULL` for the "active"
 #   version of the record (at most one).
-# - We do the object-dict conversion to handle complex types like timestamps.
-# - We *don't* check alignment between the DomainEntity class and the
-#   SQLAlchemy class, but we could (and should?).
+# - We do the object-dict conversion when creating an object.
 
 class FlatEntityDB(SqlBase):
     __tablename__ = "flat_table"
@@ -215,56 +206,67 @@ class FlatEntityDB(SqlBase):
     def __eq__(self, other):
         return (self.uid == other.uid) \
             and (self.data == other.data) \
-            and (self.created_at == other.created_at) \
-            and (self.archived_at == other.archived_at)
+            and (self.created_at == other.created_at)
 
     def __str__(self):
         return f"<FlatEntityDB/{self.uid}/{self.data}/{self.created_at}/{self.archived_at}>"
 
+# We optionally pass in the creation time `when` to make testing
+# easier: the production version will use current UTC time.
 def flatEntityCreate(engine, obj, when=None):
-    when = when if (when is not None) else datetime.now() # to support testing
-    as_dict = obj.to_dict()
+    when = when if (when is not None) else datetime.now()
+    as_dict = obj.to_nexus_dict()
     with Session(engine) as session:
         rec = FlatEntityDB(uid=as_dict["uid"], data=as_dict, created_at=when, archived_at=None)
         session.add(rec)
         session.commit()
 
+# We build the query that returns every match, then add a phrase to
+# filter out archived entries if requested. In production, we'll
+# raise a NexusException instead of asserting.
 def flatEntityGet(engine, uid, cls, archived=False):
     with Session(engine) as session:
         query = session.query(FlatEntityDB)\
                        .filter(FlatEntityDB.uid == uid)
         if not archived:
-            query = query.filter(FlatEntityDB.archived_at == None)
+            query = query.filter(FlatEntityDB.archived_at.is_(None))
         results = query.all()
         assert len(results) == 1
-        return cls.from_dict(results[0].data)
+        return cls.from_nexus_dict(results[0].data)
 
+# We can add an `archived` parameter to this in production if we want.
 def flatEntityGetAll(engine, cls):
     with Session(engine) as session:
         query = session.query(FlatEntityDB)
         results = query.all()
-        return [cls.from_dict(r.data) for r in results]
+        return [cls.from_nexus_dict(r.data) for r in results]
 
+# This duplicates code from `flatEntityGet`; we can factor that
+# into a utility function in production.
 def flatEntityExists(engine, uid, archived=False):
     with Session(engine) as session:
         query = session.query(FlatEntityDB)\
                        .filter(FlatEntityDB.uid == uid)
         if not archived:
-            query = query.filter(FlatEntityDB.archived_at == None)
+            query = query.filter(FlatEntityDB.archived_at.is_(None))
         results = query.all()
         return len(results) > 0
 
+# This checks that the entity exists before setting its archived status;
+# again, in production we'll raise a NexusException. The result is the
+# archive timestamp because I can't think of anything better to return.
+# Again, `when` is provided to simplify testing.
 def flatEntityArchive(engine, uid, when=None):
-    when = when if (when is not None) else datetime.now() # to support testing
+    when = when if (when is not None) else datetime.now()
     with Session(engine) as session:
         check = session.query(FlatEntityDB)\
                        .filter(FlatEntityDB.uid == uid)\
-                       .filter(FlatEntityDB.archived_at is not None)
+                       .filter(FlatEntityDB.archived_at.is_(None))
         results = check.all()
         assert len(results) == 1
         query = session.query(FlatEntityDB)\
                        .filter(FlatEntityDB.uid == uid)\
-                       .filter(FlatEntityDB.archived_at is not None)\
+                       .filter(FlatEntityDB.archived_at.is_(None))\
                        .update({"archived_at": when})
         session.commit()
         return when
@@ -307,7 +309,7 @@ from datetime import datetime
 
 @dataclass_json
 @dataclass
-class ChildRecord(DomainEntity):
+class ChildEntity(DomainEntity):
     when: datetime = field(
         metadata=config(
             encoder=datetime.isoformat,
@@ -317,24 +319,24 @@ class ChildRecord(DomainEntity):
 def test_child_dict():
     when = datetime(2019, 1, 2, 3, 4, 5)
     expected = {"uid": "child01", "when": when.isoformat()}
-    rec = ChildRecord(uid="child01", when=when)
+    rec = ChildEntity(uid="child01", when=when)
     as_dict = rec.to_dict()
     assert as_dict == expected
 
-    restored = ChildRecord.from_dict(as_dict)
+    restored = ChildEntity.from_nexus_dict(as_dict)
     assert restored == rec
 
 # A parent record contains a list of child records that need to be
 # persisted separately (e.g., `LuciferaseExperiment` and its samples).
-# - We have to reconstitute the children in `from_dict` ourselves.
+# We have to reconstitute the children in `from_dict` ourselves.
 
 from typing import List, Union
 
 @dataclass_json
 @dataclass
-class ParentRecord(DomainEntity):
+class ParentEntity(DomainEntity):
     name: str
-    children: List[Union[ChildRecord, str]]
+    children: List[Union[ChildEntity, str]]
 
     @classmethod
     def from_nexus_dict(cls, src: dict, children: List=None):
@@ -347,7 +349,7 @@ class ParentRecord(DomainEntity):
         else:
             assert all(isinstance(c, dict) for c in result.children), \
                 "Cannot convert non-dict to child"
-            result.children = [ChildRecord.from_nexus_dict(c) for c in result.children]
+            result.children = [ChildEntity.from_nexus_dict(c) for c in result.children]
         return result
 
     def to_nexus_dict(self, replace_uid=False) -> dict:
@@ -366,14 +368,14 @@ def second_time():
 
 @pytest.fixture
 def first_child(first_time):
-    return ChildRecord(uid="child01", when=first_time)
+    return ChildEntity(uid="child01", when=first_time)
 
 @pytest.fixture
 def second_child(second_time):
-    return ChildRecord(uid="child02", when=second_time)
+    return ChildEntity(uid="child02", when=second_time)
 
 def test_parent_dict_no_replacement(first_time, second_time, first_child, second_child):
-    parent = ParentRecord(uid="parent01", name="parent", children=[first_child, second_child])
+    parent = ParentEntity(uid="parent01", name="parent", children=[first_child, second_child])
     expected = {"uid": "parent01", "name": "parent", "children": [
         {"uid": "child01", "when": first_time.isoformat()},
         {"uid": "child02", "when": second_time.isoformat()}
@@ -381,73 +383,201 @@ def test_parent_dict_no_replacement(first_time, second_time, first_child, second
     as_dict = parent.to_nexus_dict()
     assert as_dict == expected
 
-    restored = ParentRecord.from_nexus_dict(as_dict)
+    restored = ParentEntity.from_nexus_dict(as_dict)
     assert restored == parent
 
 def test_parent_dict_with_replacement(first_time, second_time, first_child, second_child):
-    parent = ParentRecord(uid="parent01", name="parent", children=[first_child, second_child])
+    parent = ParentEntity(uid="parent01", name="parent", children=[first_child, second_child])
     expected = {"uid": "parent01", "name": "parent", "children": ["child01", "child02"]}
 
     as_dict = parent.to_nexus_dict(replace_uid=True)
     assert as_dict == expected
 
-    restored = ParentRecord.from_nexus_dict(as_dict, [first_child, second_child])
+    restored = ParentEntity.from_nexus_dict(as_dict, [first_child, second_child])
     assert restored == parent
-    assert all(isinstance(c, ChildRecord) for c in restored.children)
+    assert all(isinstance(c, ChildEntity) for c in restored.children)
 
 # ----------------------------------------------------------------------
 
-# Now that the parent/child relationship is working, let's stuff them in
-# the database. We're putting all the child data in the JSON blob, so
-# the fields are the same as they are for a flat record, *except* for a
-# parent ID column.
+# Now that parent/child JSON persistence is working, let's make it
+# work in the ORM. We want a many-to-one relationship from `ChildDB`
+# to `ParentDB`, and a one-to-many relationship from `ParentDB` to
+# `ChildDB` so that we can do lookups in both directions.
+
+# To achieve this, we need two things to `ChildDB`:
+# - `parent_id` creates the foreign key into `ParentDB`
+# - `parent` defines the relationship (and back ref) to the application
 
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import relationship
 
-class ParentRecordDB(SqlBase):
+class ParentDB(SqlBase):
     __tablename__ = "parent_table"
     uid = Column(String(16), primary_key=True, nullable=False)
     data = Column(JSON)
     created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
     archived_at = Column(TIMESTAMP)
-    children = relationship("ChildRecordDB")
 
-class ChildRecordDB(SqlBase):
+class ChildDB(SqlBase):
     __tablename__ = "child_table"
     uid = Column(String(16), primary_key=True, nullable=False)
     created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
     data = Column(JSON)
     archived_at = Column(TIMESTAMP)
+
     parent_id = Column(String(16), ForeignKey("parent_table.uid"))
+    parent = relationship("ParentDB", backref="child")
 
-def parentRecordCreate(engine, obj, when=None):
-    when = when if (when is not None) else datetime.now() # to support testing
-    as_dict = obj.to_dict(replace_uid=True)
-    print("PARENT AS DICT", as_dict)
+    def __str__(self):
+        return f"<ChildDB {self.uid}/{self.data}/@{self.parent_id}>"
+
+def test_parent_child_relationship(engine):
     with Session(engine) as session:
-        parentDB = ParentRecordDB(uid=obj.uid, data=as_dict, created_at=when, archived_at=None)
-        session.add(parentDB)
-        for child in obj.children:
-            as_dict = child.to_dict()
-            print("CHILD AS DICT", as_dict)
-            childDB = ChildRecordDB(uid=child.uid, data=as_dict, created_at=when, archived_at=None, parent_id=obj.uid)
-            session.add(childDB)
-        print("ABOUT TO COMMIT WHEN CREATING")
+        when = datetime(2021, 11, 12, 9, 8, 7)
+        p = ParentDB(uid="p123", created_at=when, data={"parent": "data"})
+        session.add(p)
+        first = ChildDB(uid="c01", created_at=when, data={"child": "first"},
+                        parent_id="p123")
+        session.add(first)
+        second = ChildDB(uid="c02", created_at=when, data={"child": "second"},
+                        parent_id="p123")
+        session.add(second)
         session.commit()
-        print("COMMITTED WHEN CREATING")
 
-def parentRecordGet(engine, uid, cls, archived=False):
     with Session(engine) as session:
-        query = session.query(ParentRecordDB)\
-                       .filter(ParentRecordDB.uid == uid)
+        records = session.query(ParentDB)\
+            .join(ChildDB, ParentDB.uid == ChildDB.parent_id)\
+            .filter(ChildDB.uid == "c01")\
+            .all()
+        assert len(records) == 1
+        assert records[0].uid == "p123"
+
+# ----------------------------------------------------------------------
+
+# Let's combine JSON and ORM persistence for experiments and samples.
+# This is what the production code will look like (except classes will
+# have many more fields).
+
+# SampleEntity looks like our ChildEntity.
+@dataclass_json
+@dataclass
+class SampleEntity(DomainEntity):
+    measure: int
+
+# LuciferaseEntity is like our ParentEntity.
+@dataclass_json
+@dataclass
+class LuciferaseEntity(DomainEntity):
+    name: str
+    samples: List[Union[SampleEntity, str]]
+
+    @classmethod
+    def from_nexus_dict(cls, src: dict, samples: List=None):
+        result = cls(**src)
+        if samples:
+            assert all(isinstance(s, str) for s in result.samples), \
+                "Cannot use non-string values to look up samples by UID"
+            by_uid = {s.uid:s for s in samples}
+            result.samples = [by_uid[s] for s in result.samples]
+        else:
+            assert all(isinstance(s, dict) for s in result.samples), \
+                "Cannot convert non-dict to sample"
+            result.samples = [SampleEntity.from_nexus_dict(s) for s in result.samples]
+        return result
+
+    def to_nexus_dict(self, replace_uid=False) -> dict:
+        temp = self.to_dict()
+        if replace_uid:
+            temp["samples"] = [s["uid"] for s in temp["samples"]]
+        return temp
+
+# LuciferaseDB maps LuciferaseEntity to the database.
+class LuciferaseDB(SqlBase):
+    __tablename__ = "luciferase_table"
+    uid = Column(String(16), primary_key=True, nullable=False)
+    data = Column(JSON)
+    created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
+    archived_at = Column(TIMESTAMP)
+
+    def __str__(self):
+        return f"<LuciferaseDB {self.uid}/{self.data}>"
+
+# SampleDB maps a single sample to the database.
+class SampleDB(SqlBase):
+    __tablename__ = "sample_table"
+    uid = Column(String(16), primary_key=True, nullable=False)
+    created_at = Column(TIMESTAMP, primary_key=True, nullable=False)
+    data = Column(JSON)
+    archived_at = Column(TIMESTAMP)
+
+    luciferase_id = Column(String(16), ForeignKey("luciferase_table.uid"))
+    luciferase = relationship("LuciferaseDB", backref="sample")
+
+    def __str__(self):
+        return f"<SampleDB {self.uid}/{self.data}/@{self.luciferase_id}>"
+
+# Create a database record, replacing contained samples with their IDs
+# in the luciferase JSON record and saving the samples separately.
+def dbLuciferaseCreate(engine, luc, when=None):
+    when = when if (when is not None) else datetime.now()
+    luc_dict = luc.to_nexus_dict(replace_uid=True)
+    sample_dicts = [sample.to_nexus_dict() for sample in luc.samples]
+    with Session(engine) as session:
+        rec = LuciferaseDB(uid=luc_dict["uid"], data=luc_dict, created_at=when)
+        session.add(rec)
+        for sample in sample_dicts:
+            rec = SampleDB(uid=sample["uid"], data=sample, created_at=when,
+                           luciferase_id=luc_dict["uid"])
+            session.add(rec)
+        session.commit()
+
+# Get a luciferase object, filling in the samples by grabbing their
+# records from the database and inserting them into the main record.
+# We can add a flag to skip this step, in which case the JSON will
+# have sample UIDs rather than sample objects, but that seems like
+# it would be error-prone.
+def dbLuciferaseGet(engine, uid, archived=False):
+    with Session(engine) as session:
+        query = session.query(SampleDB)\
+            .filter(SampleDB.luciferase_id == uid)
         if not archived:
-            query = query.filter(ParentRecordDB.archived_at == None)
+            query = query.filter(SampleDB.archived_at == None)
+        samples = query.all()
+        samples = [SampleEntity.from_nexus_dict(s.data) for s in samples]
+
+        query = session.query(LuciferaseDB)\
+            .filter(LuciferaseDB.uid == uid)
+        if not archived:
+            query = query.filter(LuciferaseDB.archived_at == None)
         results = query.all()
         assert len(results) == 1
-        return cls.from_dict(results[0].data)
+        luc = LuciferaseEntity.from_nexus_dict(results[0].data, samples)
 
-def test_nested_record_persistence(engine, parent, first_child, second_child):
-    parentRecordCreate(engine, parent)
-    restored = parentRecordGet(engine, parent.uid, ParentRecord)
-    assert restored == parent
+        return luc
+
+def test_luciferase(engine):
+    when = datetime(2021, 12, 15, 7, 7, 7)
+    sample = SampleEntity(uid="sample0001", measure=123)
+    luc = LuciferaseEntity(uid="luc987", name="luci", samples=[sample])
+    dbLuciferaseCreate(engine, luc, when)
+
+    # Recover data directly to check creation
+    with Session(engine) as session:
+        recovered = session.query(LuciferaseDB).all()
+        assert len(recovered) == 1
+        assert recovered[0].uid == "luc987"
+        assert recovered[0].data == {"uid": "luc987", "name": "luci", "samples": ["sample0001"]}
+
+        recovered = session.query(SampleDB).all()
+        assert len(recovered) == 1
+        assert recovered[0].uid == "sample0001"
+        assert recovered[0].data == {"uid": "sample0001", "measure": 123}
+
+    # Test our own getter
+    recovered = dbLuciferaseGet(engine, "luc987")
+    assert isinstance(recovered, LuciferaseEntity)
+    assert recovered.uid == "luc987"
+    assert recovered.name == "luci"
+    assert len(recovered.samples) == 1
+    assert isinstance(recovered.samples[0], SampleEntity)
+    assert recovered.samples[0].uid == "sample0001"
