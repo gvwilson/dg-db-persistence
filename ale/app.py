@@ -1,9 +1,12 @@
+#!/usr/bin/env python
+
 """Test application."""
 
+import configparser
 import os
 import sys
 
-from sqlalchemy import Boolean, Column, Integer, String, create_engine, event, not_
+from sqlalchemy import Boolean, Column, Integer, String, Text, create_engine, event, not_
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base
 from sqlalchemy.pool import StaticPool
@@ -18,12 +21,13 @@ class Machine(SqlBase):
     uid = Column(String(UID_LEN), primary_key=True, nullable=False)
     size = Column(Integer, nullable=False)
     active = Column(Boolean)
+    name = Column(Text, default="-unnamed-", nullable=False)
 
     def __str__(self):
         return f"<{self.uid}:{self.size}:{self.active}>"
 
 
-def setup(filename):
+def setup(config_file):
     # https://docs.sqlalchemy.org/en/14/dialects/sqlite.html#sqlite-foreign-keys
     @event.listens_for(Engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
@@ -32,9 +36,13 @@ def setup(filename):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    url = config["alembic"]["sqlalchemy.url"]
+
     # https://docs.sqlalchemy.org/en/14/dialects/sqlite.html#threading-pooling-behavior
     engine = create_engine(
-        f"sqlite:///{filename}",
+        url,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
@@ -64,15 +72,16 @@ def get_inactive_machines(engine):
 
 
 def main():
-    filename = os.path.abspath(sys.argv[1])
-    if os.path.exists(filename):
-        os.remove(filename)
-    engine = setup(filename)
+    if len(sys.argv) != 2:
+        print("usage: app.py <config.ini>", file=sys.stderr)
+        sys.exit(1)
+    config_file = os.path.abspath(sys.argv[1])
+    engine = setup(config_file)
     create_machines(engine)
     results = get_active_machines(engine)
-    print(f"ACTIVE: {[str(r) for r in results]}")
+    print(f"ACTIVE: {', '.join([str(r) for r in results])}")
     results = get_inactive_machines(engine)
-    print(f"INACTIVE: {[str(r) for r in results]}")
+    print(f"INACTIVE: {', '.join([str(r) for r in results])}")
 
 
 if __name__ == "__main__":
