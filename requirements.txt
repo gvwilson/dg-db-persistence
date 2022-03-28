@@ -1,8 +1,8 @@
 dataclasses-json
+ibis
 protobuf
 protobuf2pydantic
 psycopg2
 pydantic
 pytest
 sqlalchemy
-sqlite
