@@ -113,7 +113,7 @@ select * from Survey;
 
 ## The SQL Solution
 
-### Nubmer of visited per site
+### Number of visits per site
 
 ```sql
 select
@@ -132,7 +132,7 @@ group by site;
 +-------+------------+
 ```
 
-## Number of readings of each type per site
+### Number of readings of each type per site
 
 ```sql
 select
@@ -157,7 +157,106 @@ group by Visited.site, Survey.quant;
 +-------+-------+--------------+
 ```
 
-3. Show the highest reading of each type taken by each person.
+### Highest reading of each type taken by each person
+
+```sql
+select
+  Person.personal as personal,
+  Person.family as family,
+  Visited.dated as dated,
+  Survey.quant as quant,
+  max(Survey.reading) as reading
+from Person join Visited join Survey
+on (Person.id = Survey.person) and (Visited.id = Survey.taken)
+where Visited.dated is not null
+group by Person.id, Visited.dated, Survey.quant
+order by Person.family, Person.personal, Visited.dated, Survey.quant;
+```
+```
++-----------+---------+------------+-------+---------+
+| personal  | family  |   dated    | quant | reading |
++-----------+---------+------------+-------+---------+
+| William   | Dyer    | 1927-02-08 | rad   | 9.82    |
+| William   | Dyer    | 1927-02-08 | sal   | 0.13    |
+| William   | Dyer    | 1927-02-10 | rad   | 7.8     |
+| William   | Dyer    | 1927-02-10 | sal   | 0.09    |
+| Anderson  | Lake    | 1930-01-07 | sal   | 0.05    |
+| Anderson  | Lake    | 1930-02-26 | sal   | 0.1     |
+| Anderson  | Lake    | 1932-01-14 | rad   | 1.46    |
+| Anderson  | Lake    | 1932-01-14 | sal   | 0.21    |
+| Frank     | Pabodie | 1930-01-07 | rad   | 8.41    |
+| Frank     | Pabodie | 1930-01-07 | temp  | -21.5   |
+| Frank     | Pabodie | 1930-01-12 | rad   | 7.22    |
+| Frank     | Pabodie | 1930-02-26 | rad   | 4.35    |
+| Frank     | Pabodie | 1930-02-26 | temp  | -18.5   |
+| Valentina | Roerich | 1932-01-14 | sal   | 22.5    |
+| Valentina | Roerich | 1932-03-22 | rad   | 11.25   |
++-----------+---------+------------+-------+---------+
+```
+
+## The SQLAlchemy Solution
+
+Setup
+
+```python
+base = declarative_base()
+
+class Person(base):
+    __tablename__ = "Person"
+    id = Column(String, primary_key=True)
+    personal = Column(String)
+    family = Column(String)
+
+class Survey(base):
+    __tablename__ = "Survey"
+    taken = Column(Integer)
+    person = Column(String)
+    quant = Column(String)
+    reading = Column(Float)
+    __table_args__ = (
+        PrimaryKeyConstraint("taken", "quant", "reading"),
+    )
+
+class Visited(base):
+    __tablename__ = "Visited"
+    id = Column(Integer, primary_key=True)
+    site = Column(String)
+    dated = Column(Date)
+```
+
+### Number of visits per site
+
+```python
+session.query(Visited.site, func.count(Visited.site))\
+       .group_by(Visited.site)\
+       .all()
+```
+```
+| DR-1 | 3 |
+| DR-3 | 4 |
+| MSK-4 | 1 |
+```
+
+### Number of readings of each type per site
+
+```python
+session.query(Visited.site, Survey.quant, func.count())\
+       .join(Survey)\
+       .filter(Visited.id == Survey.taken)\
+       .group_by(Visited.site, Survey.quant)\
+       .all()
+```
+```
+| DR-1 | rad | 3 |
+| DR-1 | sal | 2 |
+| DR-3 | rad | 4 |
+| DR-3 | sal | 5 |
+| DR-3 | temp | 4 |
+| MSK-4 | rad | 1 |
+| MSK-4 | sal | 2 |
+```
+
+### Highest reading of each type taken by each person
 
 ```sql
 select
