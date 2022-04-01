@@ -272,17 +272,14 @@ session.query(Visited.site, Survey.quant, func.count())\
 ### Highest reading of each type taken by each person
 
 ```sql
-select
-  Person.personal as personal,
-  Person.family as family,
-  Visited.dated as dated,
-  Survey.quant as quant,
-  max(Survey.reading) as reading
-from Person join Visited join Survey
-on (Person.id = Survey.person) and (Visited.id = Survey.taken)
-where Visited.dated is not null
-group by Person.id, Visited.dated, Survey.quant
-order by Person.family, Person.personal, Visited.dated, Survey.quant;
+q = session.query(Person.personal, Person.family, Visited.dated, Survey.quant, func.max(Survey.reading))\
+           .join(Person)\
+           .filter(Person.id == Survey.person)\
+           .join(Visited)\
+           .filter(Visited.id == Survey.taken)\
+           .filter(Visited.dated.isnot(None))\
+           .group_by(Person.id, Visited.dated, Survey.quant)\
+           .order_by(Person.family, Person.personal, Visited.dated, Survey.quant)
 ```
 ```
 +-----------+---------+------------+-------+---------+
